@@ -1,0 +1,4 @@
+<launch>
+	<rosparam file="$(find ndt2_arm_control)/config/config.yaml"  />
+	<node name="arm_control" pkg="ndt2_arm_control" type="arm_control" output="screen" />
+</launch>
