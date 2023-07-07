@@ -28,6 +28,7 @@
 using namespace std;
 using namespace Eigen;
 
+// numerical integration methods
 double wrapToRange(double value, double min_value, double max_value) {
     double range = max_value - min_value;
     double wrapped_value = fmod((value - min_value), range) + min_value;
@@ -1102,6 +1103,10 @@ void CONTROLLER::arm_invdyn_control() {
 	double lambda_e = 0;
 	double c_lambda = 0;
 
+	Eigen::VectorXd vel_old, acc_old;
+	vel_old.resize(6);
+	acc_old.resize(6);
+	
 	V_eff.resize(6);
 	X_err_temp.resize(6);
 	X_err_temp<<0,0,0,0,0,0;
@@ -1243,20 +1248,33 @@ void CONTROLLER::arm_invdyn_control() {
 				f_ee <<0,0,0,0,0,0;
 				_arm_cmd = CONTROLLER::recursive_inv_dyn(_arm_state_pos, _arm_state_vel, u_q, _gravity, f_ee);
 				writedata(_arm_cmd,_tauFile);
+				
+				// save actual values for trapeze integration
+				acc_old = u_q;
+				vel_old = _vel_cmd;
 
 				_acc_cmd = CONTROLLER::inertia_matrix(_arm_state_pos).inverse()*(_arm_cmd - CONTROLLER::c_forces(_arm_state_pos,_arm_state_vel) - CONTROLLER::gravity_forces(_arm_state_pos));
-				_vel_cmd = _vel_cmd + u_q*0.01;
+				
+				// Integrations methods for velocity
+				// _vel_cmd = utilities::euler_integration(u_q,_vel_cmd,0.01); 				    // EULER
+        		_vel_cmd = utilities::trapeze_integration(u_q, acc_old, _vel_cmd, 0.01);		// TRAPEZE
+				// _vel_cmd = utilities::simpsonIntegration(u_q, acc_old, _vel_cmd, 0.01);			// SIMPSON
 				for(int i=0;i<6;i++){
 					_vel_cmd(i) = wrapToRange(_vel_cmd(i), 0.0, 1.57);
-				}			
-				_pos_cmd = _pos_cmd + _vel_cmd*0.01;
+				}	
+
+				// Integrations methods for position
+				// _pos_cmd = utilities::euler_integration(_vel_cmd,_pos_cmd,0.01); 				// EULER
+        		_pos_cmd = utilities::trapeze_integration(_vel_cmd, vel_old, _pos_cmd, 0.01);	// TRAPEZE
+				// _pos_cmd = utilities::simpsonIntegration(_vel_cmd, vel_old, _pos_cmd, 0.01);		// SIMPSON
+
 				for(int i=0;i<6;i++){
 					if (_pos_cmd(i)>0)
 						_pos_cmd(i) = fmod(_pos_cmd(i)+M_PI, 2.0*M_PI)-M_PI;
 					else
 						_pos_cmd(i) = fmod(_pos_cmd(i)-M_PI, 2.0*M_PI)+M_PI;
 				}	
-			
+				//
 				ii++;
 				_unpauseGazebo.call(unpauseSrv);
 			}			
@@ -1469,18 +1487,29 @@ void CONTROLLER::arm_invdyn_control() {
 				// _arm_cmd = u_mot;
 				writedata(_arm_cmd,_tauFile);
 
+				// save actual values for trapeze integration
+				acc_old = u_q;
+				vel_old = _vel_cmd;
+
 				_acc_cmd = CONTROLLER::inertia_matrix(_arm_state_pos).inverse()*(_arm_cmd - CONTROLLER::c_forces(_arm_state_pos,_arm_state_vel) - CONTROLLER::gravity_forces(_arm_state_pos));
-				_vel_cmd = _vel_cmd + u_q*0.01;
+				
+				// Integrations methods for velocity
+				// _vel_cmd = utilities::euler_integration(u_q,_vel_cmd,0.01); 				// EULER
+        		_vel_cmd = utilities::trapeze_integration(u_q, acc_old, _vel_cmd, 0.01);		// TRAPEZE
 				for(int i=0;i<6;i++){
 					_vel_cmd(i) = wrapToRange(_vel_cmd(i), 0.0, 1.57);
-				}			
-				_pos_cmd = _pos_cmd + _vel_cmd*0.01;
+				}	
+
+				// Integrations methods for position
+				// _pos_cmd = utilities::euler_integration(_vel_cmd,_pos_cmd,0.01); 			// EULER
+        		_pos_cmd = utilities::trapeze_integration(_vel_cmd, vel_old, _pos_cmd, 0.01);	// TRAPEZE
 				for(int i=0;i<6;i++){
 					if (_pos_cmd(i)>0)
 						_pos_cmd(i) = fmod(_pos_cmd(i)+M_PI, 2.0*M_PI)-M_PI;
 					else
 						_pos_cmd(i) = fmod(_pos_cmd(i)-M_PI, 2.0*M_PI)+M_PI;
-				}
+				}	
+				//
 
 				// ---------- Direct Force Tracking ------------
 				F_des << 0,0,0,0,0,2;
@@ -1492,18 +1521,30 @@ void CONTROLLER::arm_invdyn_control() {
 
 				_arm_cmd = u_mot + J_be_body.transpose()*(Lambda_inv.inverse())*(Identity-P)*(-F_des+Kp_f*F_err+Ki_f*F_int);
 				//-----------------------------------------------
+								
+				// save actual values for trapeze integration
+				acc_old = u_q;
+				vel_old = _vel_cmd;
+
 				_acc_cmd = CONTROLLER::inertia_matrix(_arm_state_pos).inverse()*(_arm_cmd - CONTROLLER::c_forces(_arm_state_pos,_arm_state_vel) - CONTROLLER::gravity_forces(_arm_state_pos));
-				_vel_cmd = _vel_cmd + u_q*0.01;
-				for(int i=0;i<6;i++){					
+				
+				// Integrations methods for velocity
+				// _vel_cmd = utilities::euler_integration(u_q,_vel_cmd,0.01); 				// EULER
+        		_vel_cmd = utilities::trapeze_integration(u_q, acc_old, _vel_cmd, 0.01);		// TRAPEZE
+				for(int i=0;i<6;i++){
 					_vel_cmd(i) = wrapToRange(_vel_cmd(i), 0.0, 1.57);
-				}			
-				_pos_cmd = _pos_cmd + _vel_cmd*0.01;
+				}	
+
+				// Integrations methods for position
+				// _pos_cmd = utilities::euler_integration(_vel_cmd,_pos_cmd,0.01); 			// EULER
+        		_pos_cmd = utilities::trapeze_integration(_vel_cmd, vel_old, _pos_cmd, 0.01);	// TRAPEZE
 				for(int i=0;i<6;i++){
 					if (_pos_cmd(i)>0)
 						_pos_cmd(i) = fmod(_pos_cmd(i)+M_PI, 2.0*M_PI)-M_PI;
 					else
 						_pos_cmd(i) = fmod(_pos_cmd(i)-M_PI, 2.0*M_PI)+M_PI;
-				}
+				}	
+				//
 				// // ----------------- ADMITTANCE TO RECONSTRUCT POSITION --------------
 				// Eigen::VectorXd ddz, dz, z;
 				// Eigen::MatrixXd mz, kpz, kdz;

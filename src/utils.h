@@ -436,7 +436,7 @@ namespace utilities{
 		return rad;
 	}
 	
-//--------------------SCREW THEORY FUNCTION----------------------------
+//--------------------SCREW THEORY UTILS FUNCTION----------------------------
 	inline Eigen::MatrixXd Ad_f(Eigen::Matrix4d T){
 		Eigen::MatrixXd Ad_T;
     	Ad_T.resize(6,6);
@@ -505,6 +505,84 @@ namespace utilities{
 		ad.block<3,3>(3,3) = utilities::skew(V.head(3));
 		return ad;
 	}
+
+	// INTEGRATION METHODS FUNCTIONS
+	// GOOD
+	Eigen::VectorXd euler_integration(Eigen::VectorXd input, Eigen::VectorXd old, double Ts){
+		Eigen::VectorXd result;
+		result.resize(6);
+		result = old + input*Ts;
+		return result;
+	}
+	// BETTER 
+	Eigen::VectorXd trapeze_integration(Eigen::VectorXd input, Eigen::VectorXd in_old, Eigen::VectorXd out_old, double Ts){
+		Eigen::VectorXd result;
+		result.resize(6);
+		Eigen::VectorXd avg;
+		avg.resize(6);
+		avg = (in_old + input) / 2.0;
+		result = out_old + avg * Ts;
+		return result;
+	}
+	
+	// working really bad
+	Eigen::VectorXd midpointIntegration(Eigen::VectorXd input, Eigen::VectorXd input_old, Eigen::VectorXd output_old, Eigen::VectorXd pos_old, double Ts) {
+		input.resize(6);
+		Eigen::VectorXd output, vel;
+		vel.resize(6); 
+		output.resize(6); 
+
+		// Calculate output using the midpoint method
+		Eigen::VectorXd mid_accel;
+		mid_accel.resize(6);
+		mid_accel = (input_old + input) / 2.0;
+		vel = output_old + mid_accel * Ts;
+		// Calculate position using the midpoint method
+        output = pos_old + vel * Ts;
+
+		// Return the final position
+		return output;
+	}
+
+	Eigen::VectorXd simpsonIntegration(Eigen::VectorXd input, Eigen::VectorXd old_in, Eigen::VectorXd old_out, double Ts) {
+		Eigen::VectorXd output;
+		output.resize(6);
+
+		// Calculate velocity using Simpson's rule
+		output = old_out + (old_in + 4.0 * input + old_in) * Ts / 6.0;
+
+		// Return the final position
+		return output;
+	}
+
+	Eigen::VectorXd rungeKuttaIntegration(Eigen::VectorXd input, Eigen::VectorXd old_vel, Eigen::VectorXd old_acc, Eigen::VectorXd old_pos, double Ts){
+		Eigen::VectorXd output, vel;
+		Eigen::VectorXd k1, k2, k3, k4;
+
+		output.resize(6);
+		vel.resize(6);
+		k1.resize(6);
+		k2.resize(6);
+		k3.resize(6);
+		k4.resize(6);
+
+		k1 = old_acc;
+		k2 = old_acc + 0.5 * k1 * Ts;
+		k3 = old_acc + 0.5 * k2 * Ts;
+		k4 = old_acc + k3 * Ts;
+
+		// Calculate velocity using the fourth-order Runge-Kutta method
+		vel = old_vel + (k1 + 2.0 * k2 + 2.0 * k3 + k4) * Ts / 6.0;
+
+		// Calculate position using the fourth-order Runge-Kutta method
+		output = old_pos + vel * Ts;
+
+
+		// Return the final position
+		return output;
+	}
+
+
 	
 }
 
