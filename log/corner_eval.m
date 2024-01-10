@@ -10,6 +10,10 @@ vec_3 = [dim_ee/2,  dim_ee/2, 0.0, 1.0]';
 vec_4 = [-dim_ee/2,  dim_ee/2, 0.0, 1.0]';
 
 T_cb_temp = [eye(3), [0.085,0,0.06]';[0 ,0,0,1]];           % Transformation from base_link frame to camera_temp frame
+
+% R_temp = roty(-pi/2);
+% T_cb_temp = [R_temp, [0.085,0,0.06]';[0 ,0,0,1]];           % Transformation from base_link frame to camera_temp frame
+
 T_cb = [0 0 1 0;-1 0 0 0;0 -1 0 0 ; 0 0 0 1];               % Transformation from camera_temp frame to real camera_frame
 % T = [eul2rotm([-1.5648,-0.00842267,1.96025]), [0.279861   0.0204094 -0.00404568]';[0 0 0 1]]
 
@@ -68,11 +72,11 @@ grid on
 axis equal
 
 omega = [476.703,0,400.5;0,476.703,300.5;0,0,1];
-pi = [1 0 0 0; 0 1 0 0; 0 0 1 0];
-c1_px = omega*pi*T1_c
-c2_px = omega*pi*T2_c
-c3_px = omega*pi*T3_c
-c4_px = omega*pi*T4_c
+PI = [1 0 0 0; 0 1 0 0; 0 0 1 0];
+c1_px = omega*PI*T1_c
+c2_px = omega*PI*T2_c
+c3_px = omega*PI*T3_c
+c4_px = omega*PI*T4_c
 c1_px=c1_px/c1_px(3)
 c2_px=c2_px/c2_px(3)
 c3_px=c3_px/c3_px(3)

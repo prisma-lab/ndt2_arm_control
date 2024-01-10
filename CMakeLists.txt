@@ -149,6 +149,10 @@ add_executable(arm_control src/arm_description_controller.cpp)
 target_link_libraries(arm_control ${catkin_LIBRARIES} )
 add_executable(ndt2_arm_tf_listener src/ndt2_arm_tf_listener.cpp)
 target_link_libraries(ndt2_arm_tf_listener ${catkin_LIBRARIES} )
+add_executable(ft_repub src/ft_sub_pub.cpp)
+target_link_libraries(ft_repub ${catkin_LIBRARIES} )
+add_executable(ft_hitl src/ft_hitl.cpp)
+target_link_libraries(ft_hitl ${catkin_LIBRARIES} )
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
