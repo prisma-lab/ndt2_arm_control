@@ -206,6 +206,7 @@ class CONTROLLER {
 		Eigen::Matrix<double,3,1> _haptic_lin_vel, _haptic_lin_acc;
 		Eigen::VectorXd _vel_hd;
 		bool _falcon_ibvs, _falcon_force,_parallel_control;
+		Eigen::Vector3d _hpt_wrench;
 };
 
 // Load params from file
@@ -726,7 +727,7 @@ CONTROLLER::CONTROLLER() : _first_odom_1(false), _first_odom_2(false), _camera_o
 	_haptic_lin_acc = Eigen::MatrixXd::Zero(3,1);
 
 	_vel_hd.resize(6);
-
+	_hpt_wrench.setZero();
 }
 
 // Close log-file
@@ -1186,6 +1187,11 @@ void CONTROLLER::haptic_computat(){
 	falcon_velocity_msg.data.resize(3);
 	Eigen::Matrix<double,3,1> haptic_lin_vel_prev;
 	haptic_lin_vel_prev = Eigen::MatrixXd::Zero(3,1);
+	Eigen::Vector3d img_e, d_max;
+	Eigen::Vector4d img_dist;
+	double inv_prop_fact;
+	Eigen::Vector3d hd_des; 
+	hd_des << 0.0015113981207832694, -0.0015227996045723557, 0.1047603252530098;
 
     while( ros::ok() ) {
 
@@ -1275,21 +1281,67 @@ void CONTROLLER::haptic_computat(){
 						_sd_dot_hf = (_HD_L_matrix*_HD_gamma_matrix.inverse())*(Eigen::Vector3d(_vel_hd(0),_vel_hd(1),0.0));
 					//
 
-					R_coupling << 1,0,
-								0,-1;
+					R_coupling << 1, 0,
+								  0,-1;
 					
 					haptic_kinetic_energy = _haptic_lin_vel.transpose()*M_m*_haptic_lin_vel;
 
+					// compute haptic feedback to publish in haptic_guidance_msg
+					inv_prop_fact = 0.5;
+					
+					img_e(0) =  (_s_EE(0) + _s_EE(2) + _s_EE(4) + _s_EE(6))/4;
+					img_e(1) =  (_s_EE(1) + _s_EE(3) + _s_EE(5) + _s_EE(7))/4;
+					img_e(2) = 0;
+
+					d_max << 0.0, 0.624517, 0.0;
+					img_dist(0) = sqrt(pow((img_e(0)-d_max(0)),2) + pow((_s_EE(1)-d_max(1)),2));
+					
+					d_max << 0.0, -0.626798, 0.0;
+					img_dist(1) = sqrt(pow((img_e(0)-d_max(0)),2) + pow((_s_EE(1)-d_max(1)),2));
+					
+					d_max << 0.810862, 0.0, 0.0;
+					img_dist(2) = sqrt(pow((img_e(0)-d_max(0)),2) + pow((_s_EE(1)-d_max(1)),2));
+					
+					d_max << -0.843967, 0.0, 0.0;
+					img_dist(3) = sqrt(pow((img_e(0)-d_max(0)),2) + pow((_s_EE(1)-d_max(1)),2));
+					cout << "actual dist: " << img_dist.transpose() << endl;
+
+					if(img_dist(0)<0.17 || img_dist(1)<0.8 || img_dist(2)<0.6 || img_dist(3)<0.6) {
+						if (img_dist(0)>img_dist(1)) {
+							_hpt_wrench(1) = - inv_prop_fact/img_dist(1);
+						}
+						else {
+							_hpt_wrench(1) = + inv_prop_fact/img_dist(0);
+						}
+						if (img_dist(2)>img_dist(3)){
+							_hpt_wrench(0) = + inv_prop_fact/img_dist(3);
+						}
+						else {
+							_hpt_wrench(0) = - inv_prop_fact/img_dist(2);
+						}
+					}
+					else {
+						_hpt_wrench(0)=0.0;
+						_hpt_wrench(1)=0.0;
+					}
 					// cout<< "computed vel: " << _haptic_lin_vel << endl;
+					// cout<< "computed force: " << _hpt_wrench.transpose() << endl;
 					// //qdot_teleop = k_t*(I - jacobian_cam_vision_pseudoinverse*jacobian_cam_vision)*jacobian_teleop_pseudoinverse*R_coupling*_haptic_lin_vel;
 					// qdot_teleop = k_t*N_ab*R_coupling*_haptic_lin_vel.block(0,0,2,1);
 					// //std::cout << "qdot teleop= " << std::endl << qdot_teleop << std::endl << std::endl;
 				}
+				else {
+					_hpt_wrench(0)=0.0;
+					_hpt_wrench(1)=0.0;
+					_hpt_wrench(2)=0.0;
+					//necessario fare un pid per portare il falcon in home?
+					_hpt_wrench = 55*(hd_des-x_m) + _haptic_velocity;
+				}
 			}
-			// //haptic msg
-			// haptic_guidance_msg.force.x = wrench[0];
-			// haptic_guidance_msg.force.y = wrench[1];
-			// //haptic_guidance_msg.force.z = wrench[2];
+			//haptic msg
+			haptic_guidance_msg.force.x = _hpt_wrench[0];
+			haptic_guidance_msg.force.y = _hpt_wrench[1];
+			haptic_guidance_msg.force.z = _hpt_wrench[2];
 		}
 		haptic_state_previous = haptic_state_current;
 		if(!haptic_velocity_available) {
@@ -1338,9 +1390,11 @@ void CONTROLLER::arm_invdyn_control() {
 	vel_old.resize(6);
 	acc_old.resize(6);
 
-	Eigen::VectorXd F_HD;
+	Eigen::VectorXd F_HD, F_HD_store;
 	F_HD.resize(6);
 	F_HD.setZero();
+	F_HD_store.resize(6);
+	F_HD_store.setZero();
 
 	V_eff.resize(6);
 	X_err_temp.resize(6);
@@ -1824,7 +1878,10 @@ void CONTROLLER::arm_invdyn_control() {
 					// haptic feedback manipulation
 					if(_clutch==4){
 						F_HD(5) = 0.075*(_vel_hd(2)) + 0.01*(_TT*_T_arm*_haptic_position_mat)(0,1); // M*a+Kd*v+Kp*p=F
-						F_des = F_des + F_HD; 
+						F_des = F_des + F_HD;
+						F_HD_store += F_HD;
+						_hpt_wrench(2) = F_HD_store(5)/2.5;
+						// cout<< "computed force: " << _hpt_wrench.transpose() << endl;
 					}
 				}
 				else if (F_des(5)<8.0 && _iii>1000){
