@@ -29,6 +29,59 @@
 using namespace std;
 using namespace Eigen;
 
+// Storing data classes definition
+class saved_data {
+public:
+    vector<double> x;
+    vector<double> y;
+    vector<double> z;
+
+    vector<double> vx;
+    vector<double> vy;
+    vector<double> vz;
+
+	vector<double> r;
+    vector<double> p;
+    vector<double> yaw;
+
+    vector<double> wx;
+    vector<double> wy;
+    vector<double> wz;
+
+    vector<double> fx;
+    vector<double> fy;
+    vector<double> fz;
+
+	vector<double> f_des;
+
+    vector<double> x1;
+    vector<double> x2;
+    vector<double> x3;
+    vector<double> x4;
+    vector<double> y1;
+    vector<double> y2;
+    vector<double> y3;
+    vector<double> y4;
+
+    vector<double> vx1;
+    vector<double> vx2;
+    vector<double> vx3;
+    vector<double> vx4;
+    vector<double> vy1;
+    vector<double> vy2;
+    vector<double> vy3;
+    vector<double> vy4;
+
+	vector<double> x1_des;
+    vector<double> x2_des;
+    vector<double> x3_des;
+    vector<double> x4_des;
+    vector<double> y1_des;
+    vector<double> y2_des;
+    vector<double> y3_des;
+    vector<double> y4_des;
+};
+
 // numerical integration methods
 double wrapToRange(double value, double min_value, double max_value) {
     double range = max_value - min_value;
@@ -82,6 +135,7 @@ class CONTROLLER {
         void writedata(const Vector2d & , std::ofstream & ofs);
 		void writedata(const VectorXd & , std::ofstream & ofs);
         void writedata(const Vector4d & data,std::ofstream & ofs);
+		void writeclass(const vector<double>& data, std::ofstream & pfs);
 		// Various fun
 		void run();
 		void load_parameters();
@@ -94,7 +148,9 @@ class CONTROLLER {
 		ros::Publisher  _extf_pub;
 		ros::Publisher  _cmd_tau1_pub, _cmd_tau2_pub, _cmd_tau3_pub, _cmd_tau4_pub, _cmd_tau5_pub, _cmd_tau6_pub;
 		ros::Publisher _vs_pub;
+		ros::Publisher _f_sp_pub;
 		ros::Publisher _pos_sp_pub, _vel_sp_pub, _acc_sp_pub;
+		ros::Publisher _termination_flag_pub;
         ros::Subscriber _model_state_sub;
         ros::Subscriber _ndt2_state_sub;
         ros::Subscriber _ndt2_wrench_sub;
@@ -125,6 +181,8 @@ class CONTROLLER {
 		Eigen::MatrixXd _J_arm, _NED_J_arm, _J_coupled;
 		Eigen::VectorXd _vel_mes, _vel_mes_coupled, _pose_mes_uav, _pose_mes_coupled, _arm_vel_mes, _vel_mes_uav, _ee_pos_to_world;
 		bool _traj_ready, _goal_reached, _start_controller;
+		std_msgs::Float64 _f_sp;
+		std_msgs::Bool flag_term;
 
 		//------kinematic/dynamic modeling
 		int _N_JOINTS;
@@ -178,6 +236,9 @@ class CONTROLLER {
         std::ofstream _ewFile;
         std::ofstream _f_extFile;
         std::ofstream _tauFile;
+        std::ofstream _f_novintFile, _p_novintFile, _v_novintFile, _vs_novintFile;
+        std::ofstream _f_armFile, _fdes_armFile, _p_armFile, _v_armFile, _rpy_armFile, _w_armFile, _vs_armFile, _ps_armFile, _psdes_armFile;
+
 
 		// Param from file
 		int _rate, _iii;
@@ -207,6 +268,7 @@ class CONTROLLER {
 		Eigen::VectorXd _vel_hd;
 		bool _falcon_ibvs, _falcon_force,_parallel_control;
 		Eigen::Vector3d _hpt_wrench;
+		saved_data _novint_falcon, _arm;
 };
 
 // Load params from file
@@ -291,7 +353,8 @@ CONTROLLER::CONTROLLER() : _first_odom_1(false), _first_odom_2(false), _camera_o
 	_pos_sp_pub    = _nh.advertise<std_msgs::Float64MultiArray>("/arm/pos_sp", 0);
 	_vel_sp_pub    = _nh.advertise<std_msgs::Float64MultiArray>("/arm/vel_sp", 0);
 	_acc_sp_pub    = _nh.advertise<std_msgs::Float64MultiArray>("/arm/acc_sp", 0);
-	
+	_f_sp_pub      = _nh.advertise<std_msgs::Float64>("/arm/force_setpoint", 0);
+	_termination_flag_pub = _nh.advertise<std_msgs::Bool>("/arm/termination", 0);
 	// ROS subscribers
     _ndt2_state_sub  = _nh.subscribe("/ndt2/odometry", 1, &CONTROLLER::ndt2_state_cb, this);
     _joint_state_sub = _nh.subscribe("/joint_states", 1, &CONTROLLER::joint_state_cb, this);
@@ -637,6 +700,21 @@ CONTROLLER::CONTROLLER() : _first_odom_1(false), _first_odom_2(false), _camera_o
     _ewFile.open("/home/simone/uav_ws/src/ndt2_arm_control/log/ew.txt", std::ios::out);
     _erpyFile.open("/home/simone/uav_ws/src/ndt2_arm_control/log/erpy.txt", std::ios::out);
 	_f_extFile.open("/home/simone/uav_ws/src/ndt2_arm_control/log/f_ext.txt", std::ios::out);
+	// haptic device files
+	_f_novintFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/f_novint.txt", std::ios::out);
+	_v_novintFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/v_novint.txt", std::ios::out);
+	_vs_novintFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/vs_novint.txt", std::ios::out);
+	_p_novintFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/p_novint.txt", std::ios::out);
+	_f_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/f_arm.txt", std::ios::out);
+	_fdes_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/f_des_arm.txt", std::ios::out);
+	_ps_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/ps_arm.txt", std::ios::out);
+	_psdes_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/ps_des_arm.txt", std::ios::out);
+	_vs_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/vs_arm.txt", std::ios::out);
+	_p_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/p_arm.txt", std::ios::out);
+	_v_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/v_arm.txt", std::ios::out);
+	_rpy_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/rpy_arm.txt", std::ios::out);
+	_w_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/w_arm.txt", std::ios::out);
+
 
 	_F_ee.resize(6);
 	_F_ee.setZero();
@@ -728,6 +806,8 @@ CONTROLLER::CONTROLLER() : _first_odom_1(false), _first_odom_2(false), _camera_o
 
 	_vel_hd.resize(6);
 	_hpt_wrench.setZero();
+	_f_sp.data = 0.0;
+	flag_term.data = false;
 }
 
 // Close log-file
@@ -742,6 +822,20 @@ void CONTROLLER::fileclose(){
   _erpyFile.close();
   _f_extFile.close();
 
+  _f_novintFile.close();
+  _p_novintFile.close();
+  _v_novintFile.close();
+  _vs_novintFile.close();
+
+  _f_armFile.close();
+  _fdes_armFile.close();
+  _p_armFile.close();
+  _v_armFile.close();
+  _ps_armFile.close();
+  _psdes_armFile.close();
+  _vs_armFile.close();
+  _rpy_armFile.close();
+  _w_armFile.close();
 }
 
 // Write log-file
@@ -767,6 +861,13 @@ void CONTROLLER::writedata(const Vector4d & data,std::ofstream & ofs){
 
     ofs<<data(0)<<','<<data(1)<<','<<data(2)<<','<<data(3);
     ofs<<'\n';
+}
+
+void CONTROLLER::writeclass(const vector<double>& data, std::ofstream & pfs){
+	for(const auto& element : data){
+		pfs << element << ',';
+	}
+	pfs << endl;
 }
 
 // ------ CALLBACK ROS SUBSCRIBER ------
@@ -879,6 +980,7 @@ void CONTROLLER::coupled_feedback(){
 	geometry_msgs::Wrench ext_f;
 	Eigen::VectorXd f_cmd;
 	f_cmd.resize(6);
+	f_cmd.setZero();
 
 	_T_uav.block<3,3>(0,0) = _R_uav;
 	_T_uav.block<3,1>(0,3) = _p_uav;
@@ -901,12 +1003,13 @@ void CONTROLLER::coupled_feedback(){
 	// _F_ee << _m_ext, _f_ext;
 	_F_ee <<0,0,0,_f_ext_filtered;
 	// _F_ee = utilities::Ad_f(_T_arm).transpose()*_F_ee;
-	f_cmd = utilities::Ad_f((utilities::rotx_T(-M_PI)*_T_arm).inverse()).transpose()*_F_ee;
+	// f_cmd = utilities::Ad_f((utilities::rotx_T(-M_PI)*_T_arm).inverse()).transpose()*_F_ee;
+	f_cmd = _F_ee;
 	}
 	else {
 		// _f_ext << 0,0,0;
 		// _F_ee.setZero();
-		f_cmd.setZero();
+		// f_cmd.setZero();
 	}
 	ext_f.force.x = f_cmd(3);
 	ext_f.force.y = f_cmd(4);
@@ -915,7 +1018,7 @@ void CONTROLLER::coupled_feedback(){
 	ext_f.torque.y = f_cmd(1);
 	ext_f.torque.z = f_cmd(2);
 	_extf_pub.publish(ext_f);
-	writedata(_f_ext_filtered,_f_extFile);
+	// writedata(_f_ext_filtered,_f_extFile);
 	_f_ext_old = _f_ext_filtered;
 	// Coupled position feedback
 	_NED_T_arm = utilities::rotx_T(-M_PI)*_T_arm; 					// arm dir-kin in ned frame
@@ -1076,6 +1179,47 @@ void CONTROLLER::camera_parm_computation(){
     vel << vel_temp(3), vel_temp(4), vel_temp(5), vel_temp(0), vel_temp(1), vel_temp(2);
 	_s_dot_EE = (_L_matrix*_gamma_matrix.inverse())*vel;
 	// cout<<"s E_E: "<<_s_EE.transpose()<<endl;
+
+	_arm.x.push_back(_T_arm(0,3));
+	_arm.y.push_back(_T_arm(1,3));
+	_arm.z.push_back(_T_arm(2,3));
+
+	Eigen::Vector3d rpy = utilities::MatToRpy(_T_arm.block<3,3>(0,0)); 
+	_arm.r.push_back(rpy(0));
+	_arm.p.push_back(rpy(1));
+	_arm.yaw.push_back(rpy(2));
+
+	_arm.vx.push_back(_arm_vel_mes(3));
+	_arm.vy.push_back(_arm_vel_mes(4));
+	_arm.vz.push_back(_arm_vel_mes(5));
+
+	_arm.wx.push_back(_arm_vel_mes(0));
+	_arm.wy.push_back(_arm_vel_mes(1));
+	_arm.wz.push_back(_arm_vel_mes(2));
+
+	_arm.fx.push_back(_f_ext_filtered(0));
+	_arm.fy.push_back(_f_ext_filtered(1));
+	_arm.fz.push_back(_f_ext_filtered(2));
+	
+	_arm.vx1.push_back(_s_dot_EE(0));
+	_arm.vx2.push_back(_s_dot_EE(2));
+	_arm.vx3.push_back(_s_dot_EE(4));
+	_arm.vx4.push_back(_s_dot_EE(6));
+
+	_arm.vy1.push_back(_s_dot_EE(1));
+	_arm.vy2.push_back(_s_dot_EE(3));
+	_arm.vy3.push_back(_s_dot_EE(5));
+	_arm.vy4.push_back(_s_dot_EE(7));
+
+	_arm.x1.push_back(_s_EE(0));
+	_arm.x2.push_back(_s_EE(2));
+	_arm.x3.push_back(_s_EE(4));
+	_arm.x4.push_back(_s_EE(6));
+
+	_arm.y1.push_back(_s_EE(1));
+	_arm.y2.push_back(_s_EE(3));
+	_arm.y3.push_back(_s_EE(5));
+	_arm.y4.push_back(_s_EE(7));
 }
 
 // Request new plan
@@ -1192,7 +1336,8 @@ void CONTROLLER::haptic_computat(){
 	double inv_prop_fact;
 	Eigen::Vector3d hd_des; 
 	hd_des << 0.0015113981207832694, -0.0015227996045723557, 0.1047603252530098;
-
+	double ro, eps, beta;
+	
     while( ros::ok() ) {
 
 		while( !_first_odom_1 && !_first_odom_2) usleep(0.1*1e6);
@@ -1306,18 +1451,34 @@ void CONTROLLER::haptic_computat(){
 					img_dist(3) = sqrt(pow((img_e(0)-d_max(0)),2) + pow((_s_EE(1)-d_max(1)),2));
 					cout << "actual dist: " << img_dist.transpose() << endl;
 
-					if(img_dist(0)<0.17 || img_dist(1)<0.8 || img_dist(2)<0.6 || img_dist(3)<0.6) {
-						if (img_dist(0)>img_dist(1)) {
-							_hpt_wrench(1) = - inv_prop_fact/img_dist(1);
+					if(img_dist(0)<0.2 || img_dist(1)<0.8 || img_dist(2)<0.6 || img_dist(3)<0.6) {
+						if (img_dist(0)>img_dist(1) || img_dist(1)<0.8 ) {
+							ro = 0.1;
+							eps = 1;
+							beta = 0.9;
+							_hpt_wrench(1) = - 5 * ro*exp(-eps*img_dist(1)/4)*pow(img_dist(1)/4,(-beta));
+							// _hpt_wrench(1) = - inv_prop_fact/img_dist(1);
 						}
-						else {
-							_hpt_wrench(1) = + inv_prop_fact/img_dist(0);
+						else if (img_dist(0)<img_dist(1) || img_dist(0)<0.2) {
+							ro = 3.5;
+							eps = 15;
+							beta = 0.04;
+							_hpt_wrench(1) = + 7 * ro*exp(-eps*img_dist(0))*pow(img_dist(0),(-beta));
+							// _hpt_wrench(1) = + inv_prop_fact/img_dist(0);
 						}
-						if (img_dist(2)>img_dist(3)){
-							_hpt_wrench(0) = + inv_prop_fact/img_dist(3);
+						if (img_dist(2)>img_dist(3) || img_dist(3)<0.6){
+							ro = 0.15;
+							eps = 1;
+							beta = 0.8;
+							_hpt_wrench(0) = + 5 * ro*exp(-eps*img_dist(3)/2)*pow(img_dist(3)/2,(-beta));
+							// _hpt_wrench(0) = + inv_prop_fact/img_dist(3);
 						}
-						else {
-							_hpt_wrench(0) = - inv_prop_fact/img_dist(2);
+						else if (img_dist(2)<img_dist(3) || img_dist(2)<0.6){
+							ro = 0.15;
+							eps = 1;
+							beta = 0.8;
+							_hpt_wrench(0) = - 5 * ro*exp(-eps*img_dist(2)/2)*pow(img_dist(2)/2,(-beta));
+							// _hpt_wrench(0) = - inv_prop_fact/img_dist(2);
 						}
 					}
 					else {
@@ -1337,6 +1498,27 @@ void CONTROLLER::haptic_computat(){
 					//necessario fare un pid per portare il falcon in home?
 					_hpt_wrench = 55*(hd_des-x_m) + _haptic_velocity;
 				}
+				_novint_falcon.x.push_back(x_m[0]);
+				_novint_falcon.y.push_back(x_m[1]);
+				_novint_falcon.z.push_back(x_m[2]);
+
+				_novint_falcon.vx.push_back(_haptic_lin_vel[0]);
+				_novint_falcon.vy.push_back(_haptic_lin_vel[1]);
+				_novint_falcon.vz.push_back(_haptic_lin_vel[2]);
+
+				_novint_falcon.fx.push_back(_hpt_wrench[0]);
+				_novint_falcon.fy.push_back(_hpt_wrench[1]);
+				_novint_falcon.fz.push_back(_hpt_wrench[2]);
+				
+				_novint_falcon.vx1.push_back(_sd_dot_hf(0));
+				_novint_falcon.vx2.push_back(_sd_dot_hf(2));
+				_novint_falcon.vx3.push_back(_sd_dot_hf(4));
+				_novint_falcon.vx4.push_back(_sd_dot_hf(6));
+
+				_novint_falcon.vy1.push_back(_sd_dot_hf(1));
+				_novint_falcon.vy2.push_back(_sd_dot_hf(3));
+				_novint_falcon.vy3.push_back(_sd_dot_hf(5));
+				_novint_falcon.vy4.push_back(_sd_dot_hf(7));
 			}
 			//haptic msg
 			haptic_guidance_msg.force.x = _hpt_wrench[0];
@@ -1385,7 +1567,8 @@ void CONTROLLER::arm_invdyn_control() {
 	double lambda_d = 0;
 	double lambda_e = 0;
 	double c_lambda = 0;
-
+	bool saved = false;
+	
 	Eigen::VectorXd vel_old, acc_old;
 	vel_old.resize(6);
 	acc_old.resize(6);
@@ -1551,7 +1734,7 @@ void CONTROLLER::arm_invdyn_control() {
 
 				f_ee <<0,0,0,0,0,0;
 				_arm_cmd = CONTROLLER::recursive_inv_dyn(_arm_state_pos, _arm_state_vel, u_q, _gravity, f_ee);
-				writedata(_arm_cmd,_tauFile);
+				// writedata(_arm_cmd,_tauFile);
 
 				// save actual values for trapeze integration
 				acc_old = u_q;
@@ -1814,8 +1997,19 @@ void CONTROLLER::arm_invdyn_control() {
 				e_i = e_i + e_s*0.01;
 				e_sx << e_s(0), e_s(2), e_s(4), e_s(6);
 				e_sy << e_s(1), e_s(3), e_s(5), e_s(7);
-				writedata(e_sx,_esxFile);
-				writedata(e_sy,_esyFile);
+				// writedata(e_sx,_esxFile);
+				// writedata(e_sy,_esyFile);
+
+				_arm.x1_des.push_back(sd(0));
+				_arm.x2_des.push_back(sd(2));
+				_arm.x3_des.push_back(sd(4));
+				_arm.x4_des.push_back(sd(6));
+
+				_arm.y1_des.push_back(sd(1));
+				_arm.y2_des.push_back(sd(3));
+				_arm.y3_des.push_back(sd(5));
+				_arm.y4_des.push_back(sd(7));
+
 				// cout<<"Errors: "<<e_s.transpose()<<endl;
 				// cout<<"integral error: "<<e_i.transpose()<<endl;
 				// Computation of the Dinamically consistent pseudoinverse space Jacobian
@@ -1846,7 +2040,7 @@ void CONTROLLER::arm_invdyn_control() {
 				f_ee <<0,0,0,0,0,0;
 				u_mot = CONTROLLER::recursive_inv_dyn(_arm_state_pos, _arm_state_vel, u_q, _gravity, f_ee);
 				// _arm_cmd = u_mot;
-				writedata(_arm_cmd,_tauFile);
+				// writedata(_arm_cmd,_tauFile);
 
 				// save actual values for trapeze integration
 				acc_old = u_q;
@@ -1880,14 +2074,18 @@ void CONTROLLER::arm_invdyn_control() {
 						F_HD(5) = 0.075*(_vel_hd(2)) + 0.01*(_TT*_T_arm*_haptic_position_mat)(0,1); // M*a+Kd*v+Kp*p=F
 						F_des = F_des + F_HD;
 						F_HD_store += F_HD;
-						_hpt_wrench(2) = F_HD_store(5)/2.5;
+						_hpt_wrench(2) = F_des(5)/1.75;
 						// cout<< "computed force: " << _hpt_wrench.transpose() << endl;
 					}
 				}
 				else if (F_des(5)<8.0 && _iii>1000){
-					F_des(5) = F_des(5) + 0.005;
+					F_des(5) = F_des(5) + 0.0025;
 				}
-				cout << "force setpoint: " << F_des(5) <<endl;
+				// cout << "force setpoint: " << F_des(5) <<endl;
+
+				_f_sp.data = F_des(5);
+				_f_sp_pub.publish(_f_sp);
+				_arm.f_des.push_back(F_des(5));
 				//-----------------------------
 				F_err = - F_des + _F_ee;
 				F_int = F_int + F_err*Ts;
@@ -2000,10 +2198,10 @@ void CONTROLLER::arm_invdyn_control() {
 				// Virtual acceleration cartesian space
 				u_v = (A_des + _Kd*V_error + _Kp*X_error);
 
-				writedata(Eigen::Vector3d(X_error(0),X_error(1),X_error(2)),_erpyFile);
-				writedata(Eigen::Vector3d(X_error(3),X_error(4),X_error(5)),_epFile);
-				writedata(Eigen::Vector3d(V_error(0),V_error(1),V_error(2)),_ewFile);
-				writedata(Eigen::Vector3d(V_error(3),V_error(4),V_error(5)),_evFile);
+				// writedata(Eigen::Vector3d(X_error(0),X_error(1),X_error(2)),_erpyFile);
+				// writedata(Eigen::Vector3d(X_error(3),X_error(4),X_error(5)),_epFile);
+				// writedata(Eigen::Vector3d(V_error(0),V_error(1),V_error(2)),_ewFile);
+				// writedata(Eigen::Vector3d(V_error(3),V_error(4),V_error(5)),_evFile);
 
 				u_q = J_wpi*(u_v - J_be_d*_arm_state_vel);
 
@@ -2011,7 +2209,7 @@ void CONTROLLER::arm_invdyn_control() {
 				u_mot = CONTROLLER::recursive_inv_dyn(_arm_state_pos, _arm_state_vel, u_q, _gravity, f_ee);
 				_arm_cmd = u_mot;
 				// _arm_cmd = CONTROLLER::inertia_matrix(_arm_state_pos)*u_q + CONTROLLER::c_forces(_arm_state_pos,_arm_state_vel)+CONTROLLER::gravity_forces(_arm_state_pos);
-				writedata(_arm_cmd,_tauFile);
+				// writedata(_arm_cmd,_tauFile);
 
 				// ---------- Direct Force Tracking ------------
 
@@ -2031,7 +2229,7 @@ void CONTROLLER::arm_invdyn_control() {
 			else{
 				_pauseGazebo.call(pauseSrv);
 			}
-
+			_termination_flag_pub.publish(flag_term);
 			// _unpauseGazebo.call(unpauseSrv);
 			r.sleep();
 			// _pauseGazebo.call(pauseSrv);
@@ -2040,10 +2238,89 @@ void CONTROLLER::arm_invdyn_control() {
 			_pauseGazebo.call(pauseSrv);
 			r.sleep();
 		}
-	}
-	cout<<"final pose: \n"<< dir_kin(_arm_state_pos, _S_axis, _M) <<endl;
-    cout<<"final rpy = "<<utilities::MatToRpy(((dir_kin(_arm_state_pos, _S_axis, _M)).block<3,3>(0,0))).transpose()<<endl;
+		if (!saved && _iii>=N_+4000){
 
+				flag_term.data = true;
+				_termination_flag_pub.publish(flag_term);
+
+				cout << "Task completed... Saving datas..."<<endl;
+				writeclass(_novint_falcon.x, _p_novintFile);
+				writeclass(_novint_falcon.y, _p_novintFile);
+				writeclass(_novint_falcon.z, _p_novintFile);
+
+				writeclass(_novint_falcon.vx, _v_novintFile);
+				writeclass(_novint_falcon.vy, _v_novintFile);
+				writeclass(_novint_falcon.vz, _v_novintFile);
+
+				writeclass(_novint_falcon.fx, _f_novintFile);
+				writeclass(_novint_falcon.fy, _f_novintFile);
+				writeclass(_novint_falcon.fz, _f_novintFile);
+
+				writeclass(_novint_falcon.vx1, _vs_novintFile);
+				writeclass(_novint_falcon.vy1, _vs_novintFile);
+				writeclass(_novint_falcon.vx2, _vs_novintFile);
+				writeclass(_novint_falcon.vy2, _vs_novintFile);
+				writeclass(_novint_falcon.vx3, _vs_novintFile);
+				writeclass(_novint_falcon.vy3, _vs_novintFile);
+				writeclass(_novint_falcon.vx4, _vs_novintFile);
+				writeclass(_novint_falcon.vy4, _vs_novintFile);
+
+
+				writeclass(_arm.x, _p_armFile);
+				writeclass(_arm.y, _p_armFile);
+				writeclass(_arm.z, _p_armFile);
+
+				writeclass(_arm.vx, _v_armFile);
+				writeclass(_arm.vy, _v_armFile);
+				writeclass(_arm.vz, _v_armFile);
+
+				writeclass(_arm.r, _rpy_armFile);
+				writeclass(_arm.p, _rpy_armFile);
+				writeclass(_arm.yaw, _rpy_armFile);
+
+				writeclass(_arm.wx, _w_armFile);
+				writeclass(_arm.wy, _w_armFile);
+				writeclass(_arm.wz, _w_armFile);
+
+				writeclass(_arm.fx, _f_armFile);
+				writeclass(_arm.fy, _f_armFile);
+				writeclass(_arm.fz, _f_armFile);
+
+				writeclass(_arm.f_des, _fdes_armFile);
+
+				writeclass(_arm.vx1, _vs_armFile);
+				writeclass(_arm.vy1, _vs_armFile);
+				writeclass(_arm.vx2, _vs_armFile);
+				writeclass(_arm.vy2, _vs_armFile);
+				writeclass(_arm.vx3, _vs_armFile);
+				writeclass(_arm.vy3, _vs_armFile);
+				writeclass(_arm.vx4, _vs_armFile);
+				writeclass(_arm.vy4, _vs_armFile);
+
+				writeclass(_arm.x1, _ps_armFile);
+				writeclass(_arm.y1, _ps_armFile);
+				writeclass(_arm.x2, _ps_armFile);
+				writeclass(_arm.y2, _ps_armFile);
+				writeclass(_arm.x3, _ps_armFile);
+				writeclass(_arm.y3, _ps_armFile);
+				writeclass(_arm.x4, _ps_armFile);
+				writeclass(_arm.y4, _ps_armFile);
+
+				writeclass(_arm.x1_des, _psdes_armFile);
+				writeclass(_arm.y1_des, _psdes_armFile);
+				writeclass(_arm.x2_des, _psdes_armFile);
+				writeclass(_arm.y2_des, _psdes_armFile);
+				writeclass(_arm.x3_des, _psdes_armFile);
+				writeclass(_arm.y3_des, _psdes_armFile);
+				writeclass(_arm.x4_des, _psdes_armFile);
+				writeclass(_arm.y4_des, _psdes_armFile);
+
+				cout << "Task completed... Please press Ctrl+c to terminate ROS node..."<<endl;
+				saved = true;
+			}		
+	}
+	// cout<<"final pose: \n"<< dir_kin(_arm_state_pos, _S_axis, _M) <<endl;
+    // cout<<"final rpy = "<<utilities::MatToRpy(((dir_kin(_arm_state_pos, _S_axis, _M)).block<3,3>(0,0))).transpose()<<endl;
 	_pauseGazebo.call(pauseSrv);
 }
 

@@ -40,3 +40,23 @@ Corner apriltag:
               |                   |
               |                   |
               |___________________|
+
+
+Variabili da salvare su file:
+
+    falcon:
+        posizioni nel cartesiano                    3x1
+        velocità nel cartesiano                     3x1
+        forze aptiche                               3x1
+        posizioni e velocità nel piano immagini     8x1 + 8x1
+    braccio:
+        posizione e velocità nel cartesiano         3x1 + 3x1     
+        posizione e velocità nel piano immaigine    8x1 + 8x1
+        forza desiderata                            1x1 
+        forza in feedback                           3x1
+        setpoint piano immagine                     8x1
+    drone:
+        posizione e velocità nel piano immagini     3x1 + 3x1
+        posizione e velocità nel cartesiano         8x1 + 8x1
+        setpoint nel piano immagine                 8x1
+
