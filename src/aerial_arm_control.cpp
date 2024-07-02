@@ -53,6 +53,8 @@ public:
     vector<double> fz;
 
 	vector<double> f_des;
+	vector<double> e_f;
+	vector<double> ei_f;
 
     vector<double> x1;
     vector<double> x2;
@@ -80,6 +82,30 @@ public:
     vector<double> y2_des;
     vector<double> y3_des;
     vector<double> y4_des;
+
+	vector<double> e1;
+    vector<double> e2;
+    vector<double> e3;
+    vector<double> e4;
+    vector<double> e5;
+    vector<double> e6;
+    vector<double> e7;
+    vector<double> e8;
+
+	vector<double> ed1;
+    vector<double> ed2;
+    vector<double> ed3;
+    vector<double> ed4;
+    vector<double> ed5;
+    vector<double> ed6;
+    vector<double> ed7;
+    vector<double> ed8;
+
+	vector<double> hp_dist_err1;
+	vector<double> hp_dist_err2;
+	vector<double> hp_dist_err3;
+	vector<double> hp_dist_err4;
+	vector<double> detached;
 };
 
 // numerical integration methods
@@ -90,6 +116,21 @@ double wrapToRange(double value, double min_value, double max_value) {
         wrapped_value += range;
     }
     return wrapped_value;
+}
+
+Eigen::MatrixXd calculatePointsOnLine(const Eigen::Vector2d& point1, const Eigen::Vector2d& point2, int numPoints) {
+    double m = (point2(1) - point1(1)) / (point2(0) - point1(0));
+    double totalLength = (point2 - point1).norm();
+    double stepSize = totalLength / (numPoints - 1);
+    Eigen::MatrixXd points(numPoints,2);
+
+    for (int i = 0; i < numPoints; ++i) {
+        double x = point1(0) + (i * stepSize) / totalLength * (point2(0) - point1(0));
+        double y = point1(1) + (i * stepSize) / totalLength * (point2(1) - point1(1));
+        points(i,0) = x;
+        points(i,1) = y;
+    }
+    return points;
 }
 
 // Class Definition
@@ -226,7 +267,7 @@ class CONTROLLER {
 
 		Eigen::MatrixXd _HD_L_matrix,_HD_L_matrix_p1,_HD_L_matrix_p2,_HD_L_matrix_p3,_HD_L_matrix_p4, _HD_gamma_matrix;
 		Eigen::MatrixXd _pose_HD_corner_aug, _HD_fb_aug_corner, _HD_fb_aug_norm_corner;
-		
+		Eigen::MatrixXd _sd_MAT;
 		// FileLog variables
 		std::ofstream _esxFile;
 		std::ofstream _esyFile;
@@ -236,8 +277,8 @@ class CONTROLLER {
         std::ofstream _ewFile;
         std::ofstream _f_extFile;
         std::ofstream _tauFile;
-        std::ofstream _f_novintFile, _p_novintFile, _v_novintFile, _vs_novintFile;
-        std::ofstream _f_armFile, _fdes_armFile, _p_armFile, _v_armFile, _rpy_armFile, _w_armFile, _vs_armFile, _ps_armFile, _psdes_armFile;
+        std::ofstream _f_novintFile, _p_novintFile, _v_novintFile, _vs_novintFile, _img_distFile, _img_ofbFile, _detFile;
+        std::ofstream _f_armFile, _fdes_armFile, _ef_armFile, _eif_armFile, _p_armFile, _v_armFile, _rpy_armFile, _w_armFile, _vs_armFile, _ps_armFile, _psdes_armFile, _es_armFile, _eds_armFile;
 
 
 		// Param from file
@@ -266,7 +307,7 @@ class CONTROLLER {
 		double k_t;
 		Eigen::Matrix<double,3,1> _haptic_lin_vel, _haptic_lin_acc;
 		Eigen::VectorXd _vel_hd;
-		bool _falcon_ibvs, _falcon_force,_parallel_control;
+		bool _falcon_ibvs, _falcon_force,_parallel_control, _fb_i, _fb_f;
 		Eigen::Vector3d _hpt_wrench;
 		saved_data _novint_falcon, _arm;
 };
@@ -288,6 +329,8 @@ void CONTROLLER::load_parameters(){
     _nh.getParam("falcon_i", _falcon_ibvs);
     _nh.getParam("falcon_f", _falcon_force);
     _nh.getParam("parallel_control", _parallel_control);
+    _nh.getParam("fb_f", _fb_f);
+    _nh.getParam("fb_i", _fb_i);
 	_Kp.resize(6,6);
 	_Kd.resize(6,6);
     _Kp <<  _Kp_att_yaml[0],              0,               0,               0,               0,               0,
@@ -706,6 +749,8 @@ CONTROLLER::CONTROLLER() : _first_odom_1(false), _first_odom_2(false), _camera_o
 	_vs_novintFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/vs_novint.txt", std::ios::out);
 	_p_novintFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/p_novint.txt", std::ios::out);
 	_f_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/f_arm.txt", std::ios::out);
+	_ef_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/ef_arm.txt", std::ios::out);
+	_eif_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/eif_arm.txt", std::ios::out);
 	_fdes_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/f_des_arm.txt", std::ios::out);
 	_ps_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/ps_arm.txt", std::ios::out);
 	_psdes_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/ps_des_arm.txt", std::ios::out);
@@ -714,7 +759,11 @@ CONTROLLER::CONTROLLER() : _first_odom_1(false), _first_odom_2(false), _camera_o
 	_v_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/v_arm.txt", std::ios::out);
 	_rpy_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/rpy_arm.txt", std::ios::out);
 	_w_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/w_arm.txt", std::ios::out);
-
+	_es_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/es_arm.txt", std::ios::out);
+	_eds_armFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/eds_arm.txt", std::ios::out);
+	_img_distFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/img_dist.txt", std::ios::out);
+	_detFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/detach.txt", std::ios::out);
+	_img_ofbFile.open("/home/simone/uav_ws/src/ndt2_arm_control/logger/ofb.txt", std::ios::out);
 
 	_F_ee.resize(6);
 	_F_ee.setZero();
@@ -808,6 +857,8 @@ CONTROLLER::CONTROLLER() : _first_odom_1(false), _first_odom_2(false), _camera_o
 	_hpt_wrench.setZero();
 	_f_sp.data = 0.0;
 	flag_term.data = false;
+	_sd_MAT.resize(6000,8);
+	_sd_MAT.setZero();
 }
 
 // Close log-file
@@ -829,13 +880,20 @@ void CONTROLLER::fileclose(){
 
   _f_armFile.close();
   _fdes_armFile.close();
+  _ef_armFile.close();
+  _eif_armFile.close();
   _p_armFile.close();
   _v_armFile.close();
   _ps_armFile.close();
+  _es_armFile.close();
+  _eds_armFile.close();
   _psdes_armFile.close();
   _vs_armFile.close();
   _rpy_armFile.close();
   _w_armFile.close();
+  _img_distFile.close();
+  _detFile.close();
+  _img_ofbFile.close();
 }
 
 // Write log-file
@@ -1347,7 +1405,7 @@ void CONTROLLER::haptic_computat(){
 				Eigen::Matrix<double,3,1> x_m(haptic_state_current.data());
 				Eigen::Matrix<double,3,1> x_m_prev(haptic_state_previous.data());
 										
-				if (_clutch == 4) {
+				// if (_clutch == 4) {
 					_haptic_position << haptic_state_current[0], haptic_state_current[1], 0.0;
 					_haptic_position_mat << 1.0, 0.0, 0.0, _haptic_position(0),
 											0.0, 1.0, 0.0, _haptic_position(1),
@@ -1420,9 +1478,9 @@ void CONTROLLER::haptic_computat(){
 					vel_temp_hd = utilities::Ad_f(_TT*_T_arm)*(vel_temp_hd);
 					
 					_vel_hd << vel_temp_hd(3), vel_temp_hd(4), vel_temp_hd(5), vel_temp_hd(0), vel_temp_hd(1), vel_temp_hd(2);
-					if(_falcon_ibvs)
+					if(_clutch == 4 && _falcon_ibvs && !_falcon_force)
 						_sd_dot_hf = (_HD_L_matrix*_HD_gamma_matrix.inverse())*_vel_hd;
-					if (_falcon_force)
+					else if (_clutch == 4 && _falcon_force && _parallel_control)
 						_sd_dot_hf = (_HD_L_matrix*_HD_gamma_matrix.inverse())*(Eigen::Vector3d(_vel_hd(0),_vel_hd(1),0.0));
 					//
 
@@ -1437,66 +1495,77 @@ void CONTROLLER::haptic_computat(){
 					img_e(0) =  (_s_EE(0) + _s_EE(2) + _s_EE(4) + _s_EE(6))/4;
 					img_e(1) =  (_s_EE(1) + _s_EE(3) + _s_EE(5) + _s_EE(7))/4;
 					img_e(2) = 0;
+					// cout << img_e.transpose() << endl;
 
-					d_max << 0.0, 0.624517, 0.0;
-					img_dist(0) = sqrt(pow((img_e(0)-d_max(0)),2) + pow((_s_EE(1)-d_max(1)),2));
+					if ( img_e(1)>0.62 || img_e(1)>0.50 || img_e(1)<=-0.17 || (img_e(0)<-0.48) || (img_e(0)>0.48))
+						_novint_falcon.detached.push_back(1);
+					else
+						_novint_falcon.detached.push_back(0);
+
+					d_max << 0.0, 0.65, 0.0; 
+					img_dist(0) = sqrt(pow((img_e(0)-d_max(0)),2) + pow((img_e(1)-d_max(1)),2));
 					
-					d_max << 0.0, -0.626798, 0.0;
-					img_dist(1) = sqrt(pow((img_e(0)-d_max(0)),2) + pow((_s_EE(1)-d_max(1)),2));
+					d_max << 0.0, -0.35, 0.0; // occlusion
+					img_dist(1) = sqrt(pow((img_e(0)-d_max(0)),2) + pow((img_e(1)-d_max(1)),2));
 					
 					d_max << 0.810862, 0.0, 0.0;
-					img_dist(2) = sqrt(pow((img_e(0)-d_max(0)),2) + pow((_s_EE(1)-d_max(1)),2));
+					img_dist(2) = sqrt(pow((img_e(0)-d_max(0)),2) + pow((img_e(1)-d_max(1)),2));
 					
-					d_max << -0.843967, 0.0, 0.0;
-					img_dist(3) = sqrt(pow((img_e(0)-d_max(0)),2) + pow((_s_EE(1)-d_max(1)),2));
-					cout << "actual dist: " << img_dist.transpose() << endl;
-
-					if(img_dist(0)<0.2 || img_dist(1)<0.8 || img_dist(2)<0.6 || img_dist(3)<0.6) {
-						if (img_dist(0)>img_dist(1) || img_dist(1)<0.8 ) {
+					d_max << -0.810862, 0.0, 0.0;
+					img_dist(3) = sqrt(pow((img_e(0)-d_max(0)),2) + pow((img_e(1)-d_max(1)),2));
+					// cout << "actual dist: " << img_dist.transpose() << endl;
+					_novint_falcon.hp_dist_err1.push_back(img_dist(0));
+					_novint_falcon.hp_dist_err2.push_back(img_dist(1));
+					_novint_falcon.hp_dist_err3.push_back(img_dist(2));
+					_novint_falcon.hp_dist_err4.push_back(img_dist(3));
+					_hpt_wrench(0) = 0.0;
+					_hpt_wrench(1) = 0.0;
+					// if(img_dist(0)<0.2 || img_dist(1)<0.8 || img_dist(2)<0.6 || img_dist(3)<0.6) {
+						// if (img_dist(0)>img_dist(1) || img_dist(1)<0.8 ) {
 							ro = 0.1;
-							eps = 1;
+							eps = 2;
 							beta = 0.9;
-							_hpt_wrench(1) = - 5 * ro*exp(-eps*img_dist(1)/4)*pow(img_dist(1)/4,(-beta));
+							_hpt_wrench(1) = - 1.7 *  8 * ro*exp(-eps*img_dist(1))*pow(img_dist(1),(-beta));
 							// _hpt_wrench(1) = - inv_prop_fact/img_dist(1);
-						}
-						else if (img_dist(0)<img_dist(1) || img_dist(0)<0.2) {
-							ro = 3.5;
-							eps = 15;
-							beta = 0.04;
-							_hpt_wrench(1) = + 7 * ro*exp(-eps*img_dist(0))*pow(img_dist(0),(-beta));
+						// }
+						// else if (img_dist(0)<img_dist(1) || img_dist(0)<0.2) {
+							ro = 0.1;
+							eps = 2;
+							beta = 0.9;
+							_hpt_wrench(1) += + 1.7 * 8 * ro*exp(-eps*img_dist(0))*pow(img_dist(0),(-beta));
 							// _hpt_wrench(1) = + inv_prop_fact/img_dist(0);
-						}
-						if (img_dist(2)>img_dist(3) || img_dist(3)<0.6){
+						// }
+						// if (img_dist(2)>img_dist(3) || img_dist(3)<0.6){
 							ro = 0.15;
 							eps = 1;
 							beta = 0.8;
-							_hpt_wrench(0) = + 5 * ro*exp(-eps*img_dist(3)/2)*pow(img_dist(3)/2,(-beta));
+							_hpt_wrench(0) = + 1.7 *  8 * ro*exp(-eps*img_dist(3))*pow(img_dist(3),(-beta));
 							// _hpt_wrench(0) = + inv_prop_fact/img_dist(3);
-						}
-						else if (img_dist(2)<img_dist(3) || img_dist(2)<0.6){
+						// }
+						// else if (img_dist(2)<img_dist(3) || img_dist(2)<0.6){
 							ro = 0.15;
 							eps = 1;
 							beta = 0.8;
-							_hpt_wrench(0) = - 5 * ro*exp(-eps*img_dist(2)/2)*pow(img_dist(2)/2,(-beta));
+							_hpt_wrench(0) += - 1.7 *  8 * ro*exp(-eps*img_dist(2))*pow(img_dist(2),(-beta));
 							// _hpt_wrench(0) = - inv_prop_fact/img_dist(2);
-						}
-					}
-					else {
-						_hpt_wrench(0)=0.0;
-						_hpt_wrench(1)=0.0;
-					}
+						// }
+					// }
+					// else {
+					// 	_hpt_wrench(0)=0.0;
+					// 	_hpt_wrench(1)=0.0;
+					// }
 					// cout<< "computed vel: " << _haptic_lin_vel << endl;
 					// cout<< "computed force: " << _hpt_wrench.transpose() << endl;
 					// //qdot_teleop = k_t*(I - jacobian_cam_vision_pseudoinverse*jacobian_cam_vision)*jacobian_teleop_pseudoinverse*R_coupling*_haptic_lin_vel;
 					// qdot_teleop = k_t*N_ab*R_coupling*_haptic_lin_vel.block(0,0,2,1);
 					// //std::cout << "qdot teleop= " << std::endl << qdot_teleop << std::endl << std::endl;
-				}
-				else {
+				// }
+				if (!_fb_f || !_fb_i) {
 					_hpt_wrench(0)=0.0;
 					_hpt_wrench(1)=0.0;
 					_hpt_wrench(2)=0.0;
 					//necessario fare un pid per portare il falcon in home?
-					_hpt_wrench = 55*(hd_des-x_m) + _haptic_velocity;
+					// _hpt_wrench = 55*(hd_des-x_m) + _haptic_velocity;
 				}
 				_novint_falcon.x.push_back(x_m[0]);
 				_novint_falcon.y.push_back(x_m[1]);
@@ -1529,12 +1598,13 @@ void CONTROLLER::haptic_computat(){
 		if(!haptic_velocity_available) {
 			haptic_velocity_available = true;
 		}
-		haptic_guidance_pub.publish(haptic_guidance_msg);
-		haptic_kinetic_energy_msg.data = haptic_kinetic_energy;
-		kin_energy_pub.publish(haptic_kinetic_energy_msg);
-		Eigen::VectorXd::Map(&falcon_velocity_msg.data[0], _haptic_lin_vel.size()) = _haptic_lin_vel;
-		velocity_pub.publish(falcon_velocity_msg);
-
+		// if(_fb_f || _fb_i){
+			haptic_guidance_pub.publish(haptic_guidance_msg);
+			haptic_kinetic_energy_msg.data = haptic_kinetic_energy;
+			kin_energy_pub.publish(haptic_kinetic_energy_msg);
+			Eigen::VectorXd::Map(&falcon_velocity_msg.data[0], _haptic_lin_vel.size()) = _haptic_lin_vel;
+			velocity_pub.publish(falcon_velocity_msg);
+		// }
     	r.sleep();
     }
 
@@ -1557,6 +1627,7 @@ void CONTROLLER::arm_invdyn_control() {
 	Eigen::Vector4d e_sx, e_sy;
 	Eigen::VectorXd F_err, F_des, F_int;
 	Eigen::MatrixXd P, P2, Kp_f, Ki_f, J_be_body, Lambda_inv;
+	Eigen::VectorXd sd1,sd2,sd3;
 	bool ibvs_flag = false;
 	int i = 0;
 	int ii = 0;
@@ -1606,6 +1677,12 @@ void CONTROLLER::arm_invdyn_control() {
     vs.resize(8,1);
     sd.resize(8,1);
 	sd.setZero();
+    sd1.resize(8,1);
+	sd1.setZero();
+    sd2.resize(8,1);
+	sd2.setZero();
+    sd3.resize(8,1);
+	sd3.setZero();
     sd_new.resize(8,1);
     sd_dot.resize(8,1);
     sd_dot.resize(8,1);
@@ -1621,7 +1698,7 @@ void CONTROLLER::arm_invdyn_control() {
 
 	F_des.resize(6);
 	F_des.setZero();
-	F_des << 0,0,0,0,0,2;
+	F_des << 0,0,0,0,0,0.5;
 	F_err.resize(6);
 	F_err.setZero();
 	F_int.resize(6);
@@ -1681,6 +1758,37 @@ void CONTROLLER::arm_invdyn_control() {
 	sd_dot.setZero();
 	sd_mat << sd(0), sd(2), sd(4), sd(6), sd(1), sd(3), sd(5), sd(7), 1,1,1,1;
 	cout<<"sd matrix: "<< _K_camera*sd_mat<<endl;
+
+	// traj image full
+	// first constant
+	for(int k=0;k<1000;k++){
+		_sd_MAT.block<1000,8>(k,0) << sd(0), sd(1), sd(2), sd(3), sd(4), sd(5), sd(6), sd(7);
+	}
+	// first vertex
+	sd1 << -0.443484,  0.504802, -0.365321,  0.504802, -0.365321,   0.42664, -0.443484,   0.42664;
+	_sd_MAT.block<1500,2>(1000,0) = calculatePointsOnLine( Eigen::Vector2d(sd.segment(0,2)), Eigen::Vector2d(sd1.segment(0,2)), 1500);
+	_sd_MAT.block<1500,2>(1000,2) = calculatePointsOnLine( Eigen::Vector2d(sd.segment(2,2)), Eigen::Vector2d(sd1.segment(2,2)), 1500);
+	_sd_MAT.block<1500,2>(1000,4) = calculatePointsOnLine( Eigen::Vector2d(sd.segment(4,2)), Eigen::Vector2d(sd1.segment(4,2)), 1500);
+	_sd_MAT.block<1500,2>(1000,6) = calculatePointsOnLine( Eigen::Vector2d(sd.segment(6,2)), Eigen::Vector2d(sd1.segment(6,2)), 1500);
+	// second vertex
+	sd2 << -0.0322384,   -0.08901,  0.0426338,   -0.08901,  0.0426338,  -0.163882, -0.0322384,  -0.163882;	
+	_sd_MAT.block<1000,2>(2500,0) = calculatePointsOnLine( Eigen::Vector2d(sd1.segment(0,2)), Eigen::Vector2d(sd2.segment(0,2)), 1000);
+	_sd_MAT.block<1000,2>(2500,2) = calculatePointsOnLine( Eigen::Vector2d(sd1.segment(2,2)), Eigen::Vector2d(sd2.segment(2,2)), 1000);
+	_sd_MAT.block<1000,2>(2500,4) = calculatePointsOnLine( Eigen::Vector2d(sd1.segment(4,2)), Eigen::Vector2d(sd2.segment(4,2)), 1000);
+	_sd_MAT.block<1000,2>(2500,6) = calculatePointsOnLine( Eigen::Vector2d(sd1.segment(6,2)), Eigen::Vector2d(sd2.segment(6,2)), 1000);
+	// third vertex
+	sd3 << 0.4245,    0.4905,    0.4988,    0.4905,    0.4988,    0.4162,    0.4245,    0.4162;
+	_sd_MAT.block<1000,2>(3500,0) = calculatePointsOnLine( Eigen::Vector2d(sd2.segment(0,2)), Eigen::Vector2d(sd3.segment(0,2)), 1000);
+	_sd_MAT.block<1000,2>(3500,2) = calculatePointsOnLine( Eigen::Vector2d(sd2.segment(2,2)), Eigen::Vector2d(sd3.segment(2,2)), 1000);
+	_sd_MAT.block<1000,2>(3500,4) = calculatePointsOnLine( Eigen::Vector2d(sd2.segment(4,2)), Eigen::Vector2d(sd3.segment(4,2)), 1000);
+	_sd_MAT.block<1000,2>(3500,6) = calculatePointsOnLine( Eigen::Vector2d(sd2.segment(6,2)), Eigen::Vector2d(sd3.segment(6,2)), 1000);
+
+	// coming back to initial position
+	_sd_MAT.block<1500,2>(4500,0) = calculatePointsOnLine( Eigen::Vector2d(sd3.segment(0,2)), Eigen::Vector2d(sd.segment(0,2)), 1500);
+	_sd_MAT.block<1500,2>(4500,2) = calculatePointsOnLine( Eigen::Vector2d(sd3.segment(2,2)), Eigen::Vector2d(sd.segment(2,2)), 1500);
+	_sd_MAT.block<1500,2>(4500,4) = calculatePointsOnLine( Eigen::Vector2d(sd3.segment(4,2)), Eigen::Vector2d(sd.segment(4,2)), 1500);
+	_sd_MAT.block<1500,2>(4500,6) = calculatePointsOnLine( Eigen::Vector2d(sd3.segment(6,2)), Eigen::Vector2d(sd.segment(6,2)), 1500);
+	//
 	
 	// Computing desired trajectory
 	new_plan();
@@ -1692,7 +1800,7 @@ void CONTROLLER::arm_invdyn_control() {
 			if(ii>1 || i>1 || _iii>1){
 				coupled_feedback();
 			}
-			if(ii<2*N_ && !_start_vs){
+			if(ii<1.5*N_ && !_start_vs){
 				if(ii==0){
 					cout<<"Starting Phase 1...\nApproaching Apriltag..."<<endl;
 				}
@@ -1765,7 +1873,7 @@ void CONTROLLER::arm_invdyn_control() {
 				ii++;
 				_unpauseGazebo.call(unpauseSrv);
 			}
-			else if(_camera_on && ibvs_flag && _iii<N_+4000 && (ii>2*N_-1 || _start_vs)){
+			else if(_camera_on && ibvs_flag && _iii<N_+4000 && (ii>1.5*N_-1 || _start_vs)){
 				if(_iii==0){
 					cout<<"Starting Phase 2...\nE-E IBVS..."<<endl;
 				}
@@ -1782,15 +1890,15 @@ void CONTROLLER::arm_invdyn_control() {
 
 				// switch continuo
 				c_lambda = 0.05; //0.025
-				if(_iii<N_){
+				if(_iii<N_ || (_f_ext_filtered(5)>0 || _f_ext_filtered(5)<0)){
 					// cout<<"Errors: "<<e_s.transpose()<<endl;
-					if((_iii>1000 &&  abs(e_s(0)))>0.005 && abs(e_s(0))<=0.1){
-						if(_iii==1001){
+					if(((_iii>100 &&  abs(e_s(0)))>0.025 && abs(e_s(0))<=0.1) || (_f_ext_filtered(5)>0 || _f_ext_filtered(5)<0)){
+						if(_iii==101){
 							cout<<"Starting interaction control..."<<endl;
 						}
-						lambda_d = 0.5*(1+cos((e_s(0)-0.005)/(0.1-0.005)*M_PI));
+						lambda_d = 0.5*(1+cos((e_s(0)-0.025)/(0.1-0.025)*M_PI));
 					}
-					else if(_iii>1000 &&  abs(e_s(0))<=0.005){
+					else if(_iii>100 && abs(e_s(0))<=0.025 || (_f_ext_filtered(5)>0 || _f_ext_filtered(5)<0)){
 						lambda_d = 1;
 					}
 					else{
@@ -1810,16 +1918,26 @@ void CONTROLLER::arm_invdyn_control() {
 					// }
 					lambda_e = 1;
 
-					if(F_des.norm()>0){
+					if(F_des.norm()>0 || (_f_ext_filtered(5)>0 || _f_ext_filtered(5)<0) ){
 						lambda_k = c_lambda*lambda_d*lambda_e+(1-c_lambda)*lambda_k;
 					}
 					else{
 						lambda_k = 0;
 					}
+					if (!(_f_ext_filtered(5)>0 || _f_ext_filtered(5)<0) || F_des(5)<0.0)
+						_arm.detached.push_back(1);
+					else
+						_arm.detached.push_back(0);
 				}
 				else{
 						// lambda_k = 1;
 						lambda_k = c_lambda*lambda_d*lambda_e+(1-c_lambda)*lambda_k;
+						if (!(_f_ext_filtered(5)>0 || _f_ext_filtered(5)<0) || F_des(5)<0.0){
+							lambda_k = 0;
+							_arm.detached.push_back(1);
+						}
+						else
+							_arm.detached.push_back(0);
 				}
 				if(_parallel_control){
 					P(5,5) = 1 - lambda_k;
@@ -1872,21 +1990,30 @@ void CONTROLLER::arm_invdyn_control() {
 
 				// }
 				// ---------------------SLIDING---------------------
-				if(_iii>2*N_ && !_falcon_ibvs){
-					if(_iii==2*N_+1){
+				if(_iii>N_ && !_falcon_ibvs){
+					if(_iii==N_+1){
 						cout<<"Starting Phase 3\nSliding on surface..."<<endl;
 					}
-					if(_iii<(2*N_+N_*0.4)){
+					// if(_iii<(2*N_+N_*0.4)){
 
-						sd(0,0) = sd(0,0)-0.0001*(_iii/100-2*N_/100);
-						sd(2,0) = sd(2,0)-0.0001*(_iii/100-2*N_/100);
-						sd(4,0) = sd(4,0)-0.0001*(_iii/100-2*N_/100);
-						sd(6,0) = sd(6,0)-0.0001*(_iii/100-2*N_/100);
+					// 	sd(0,0) = sd(0,0)-0.0001*(_iii/100-2*N_/100);
+					// 	sd(2,0) = sd(2,0)-0.0001*(_iii/100-2*N_/100);
+					// 	sd(4,0) = sd(4,0)-0.0001*(_iii/100-2*N_/100);
+					// 	sd(6,0) = sd(6,0)-0.0001*(_iii/100-2*N_/100);
 
-						if(_iii==2*N_+1){
-							cout<<"step 1"<<endl;
-						}
-					}
+					// 	// if(_iii==2*N_+1){
+					// 	// 	cout<<"step 1"<<endl;
+					// 	// }
+					// }
+					// if(_iii< (N_+N_/2)){
+					// 	sd << -0.543484,  0.534802, -0.465321,  0.534802, -0.465321,   0.45664, -0.543484,   0.45664;
+					// }
+					// else if(_iii<2*N_){		
+					// 	sd << -0.0322384,   -0.12901,  0.0426338,   -0.12901,  0.0426338,  -0.203882, -0.0322384,  -0.203882;
+					// }
+					// else {
+					// 	sd << 0.4245,    0.4905,    0.4988,    0.4905,    0.4988,    0.4162,    0.4245,    0.4162;
+					// }
 					// else if(_iii>(2*N_+N_*0.4) && _iii<(2*N_+N_*0.4+N_*0.2)){
 					// 	sd(1,0) = sd(1,0)-0.0001*(_iii/100-(2*N_+N_*0.4)/100);
 					// 	sd(3,0) = sd(3,0)-0.0001*(_iii/100-(2*N_+N_*0.4)/100);
@@ -1967,8 +2094,11 @@ void CONTROLLER::arm_invdyn_control() {
 					if(_clutch == 4) {
 						sd = sd + sd_dot_new*0.01;
 					}
-
-					if(_start_ibvs){
+				}
+				else{
+					sd << _sd_MAT(_iii,0),_sd_MAT(_iii,1),_sd_MAT(_iii,2),_sd_MAT(_iii,3),_sd_MAT(_iii,4),_sd_MAT(_iii,5),_sd_MAT(_iii,6),_sd_MAT(_iii,7);
+				}
+				if(_start_ibvs){
 						Eigen::MatrixXd sd_new_mat, HD_fb_aug_corner;
 						sd_new_mat.resize(3,4);
 						HD_fb_aug_corner.resize(3,4);
@@ -1987,7 +2117,6 @@ void CONTROLLER::arm_invdyn_control() {
 						corners_px.data[8] = HD_fb_aug_corner(1,3);
 						_vs_pub.publish(corners_px);
 					}
-				}
 				//-------------------------------
 
 				e_s = (sd -_s_EE); 
@@ -2009,6 +2138,26 @@ void CONTROLLER::arm_invdyn_control() {
 				_arm.y2_des.push_back(sd(3));
 				_arm.y3_des.push_back(sd(5));
 				_arm.y4_des.push_back(sd(7));
+
+				_arm.e1.push_back(e_s(0));
+				_arm.e2.push_back(e_s(1));
+				_arm.e3.push_back(e_s(2));
+				_arm.e4.push_back(e_s(3));
+
+				_arm.e5.push_back(e_s(4));
+				_arm.e6.push_back(e_s(5));
+				_arm.e7.push_back(e_s(6));
+				_arm.e8.push_back(e_s(7));
+
+				_arm.ed1.push_back(edot_s(0));
+				_arm.ed2.push_back(edot_s(1));
+				_arm.ed3.push_back(edot_s(2));
+				_arm.ed4.push_back(edot_s(3));
+
+				_arm.ed5.push_back(edot_s(4));
+				_arm.ed6.push_back(edot_s(5));
+				_arm.ed7.push_back(edot_s(6));
+				_arm.ed8.push_back(edot_s(7));
 
 				// cout<<"Errors: "<<e_s.transpose()<<endl;
 				// cout<<"integral error: "<<e_i.transpose()<<endl;
@@ -2071,24 +2220,34 @@ void CONTROLLER::arm_invdyn_control() {
 				if(_falcon_force){
 					// haptic feedback manipulation
 					if(_clutch==4){
-						F_HD(5) = 0.075*(_vel_hd(2)) + 0.01*(_TT*_T_arm*_haptic_position_mat)(0,1); // M*a+Kd*v+Kp*p=F
-						F_des = F_des + F_HD;
+						_haptic_position_mat << 1.0, 0.0, 0.0, 0.0,
+												0.0, 1.0, 0.0, 0.0,
+												0.0, 0.0, 1.0, _haptic_position(2),
+												0.0, 0.0, 0.0, 1.0;
+						if (_vel_hd(2)>0.05 || _vel_hd(2)<-0.05) {
+							F_HD(5) = 0.045*(_vel_hd(2));// + 0.01*(_TT*_T_arm*_haptic_position_mat)(0,3); // M*a+Kd*v+Kp*p=F
+							F_des = F_des + F_HD;
+						}
+						// if (!_fb_f)
+						// 	F_des = F_des + F_HD;
+
 						F_HD_store += F_HD;
-						_hpt_wrench(2) = F_des(5)/1.75;
 						// cout<< "computed force: " << _hpt_wrench.transpose() << endl;
 					}
 				}
-				else if (F_des(5)<8.0 && _iii>1000){
+				else if (F_des(5)<2.0 && _iii>200){
 					F_des(5) = F_des(5) + 0.0025;
 				}
 				// cout << "force setpoint: " << F_des(5) <<endl;
-
+				_hpt_wrench(2) = F_des(5)*0.85;
 				_f_sp.data = F_des(5);
 				_f_sp_pub.publish(_f_sp);
 				_arm.f_des.push_back(F_des(5));
 				//-----------------------------
 				F_err = - F_des + _F_ee;
 				F_int = F_int + F_err*Ts;
+				_arm.e_f.push_back(F_err(5));
+				_arm.ei_f.push_back(F_int(5));
 
 				J_be_body = utilities::Ad_f(T_eff.inverse())*J_be; //Body Jacobian
 				Lambda_inv = J_be_body*(inertia_matrix(_arm_state_pos)).inverse()*J_be_body.transpose();
@@ -2265,6 +2424,12 @@ void CONTROLLER::arm_invdyn_control() {
 				writeclass(_novint_falcon.vx4, _vs_novintFile);
 				writeclass(_novint_falcon.vy4, _vs_novintFile);
 
+				writeclass(_novint_falcon.hp_dist_err1, _img_distFile);
+				writeclass(_novint_falcon.hp_dist_err2, _img_distFile);
+				writeclass(_novint_falcon.hp_dist_err3, _img_distFile);
+				writeclass(_novint_falcon.hp_dist_err4, _img_distFile);
+
+				writeclass(_novint_falcon.detached, _img_ofbFile);
 
 				writeclass(_arm.x, _p_armFile);
 				writeclass(_arm.y, _p_armFile);
@@ -2287,6 +2452,8 @@ void CONTROLLER::arm_invdyn_control() {
 				writeclass(_arm.fz, _f_armFile);
 
 				writeclass(_arm.f_des, _fdes_armFile);
+				writeclass(_arm.e_f, _ef_armFile);
+				writeclass(_arm.ei_f, _eif_armFile);
 
 				writeclass(_arm.vx1, _vs_armFile);
 				writeclass(_arm.vy1, _vs_armFile);
@@ -2314,6 +2481,26 @@ void CONTROLLER::arm_invdyn_control() {
 				writeclass(_arm.y3_des, _psdes_armFile);
 				writeclass(_arm.x4_des, _psdes_armFile);
 				writeclass(_arm.y4_des, _psdes_armFile);
+
+				writeclass(_arm.e1, _es_armFile);
+				writeclass(_arm.e2, _es_armFile);
+				writeclass(_arm.e3, _es_armFile);
+				writeclass(_arm.e4, _es_armFile);
+				writeclass(_arm.e5, _es_armFile);
+				writeclass(_arm.e6, _es_armFile);
+				writeclass(_arm.e7, _es_armFile);
+				writeclass(_arm.e8, _es_armFile);
+
+				writeclass(_arm.ed1, _eds_armFile);
+				writeclass(_arm.ed2, _eds_armFile);
+				writeclass(_arm.ed3, _eds_armFile);
+				writeclass(_arm.ed4, _eds_armFile);
+				writeclass(_arm.ed5, _eds_armFile);
+				writeclass(_arm.ed6, _eds_armFile);
+				writeclass(_arm.ed7, _eds_armFile);
+				writeclass(_arm.ed8, _eds_armFile);
+
+				writeclass(_arm.detached,_detFile);
 
 				cout << "Task completed... Please press Ctrl+c to terminate ROS node..."<<endl;
 				saved = true;
